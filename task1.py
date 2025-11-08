@@ -25,6 +25,9 @@ import os
 import cv2
 import numpy as np
 
+verbose = False
+
+
 def saveOutput(output_path, content, output_type = 'txt'):
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     if output_type == 'txt':
@@ -102,6 +105,7 @@ def processImage(image_path):
     """
     print(f"{GREEN}_____________________________________________________________________")
     print(f"Beginning of processing for {image_path}{RESET}")
+    
     visualisationDirectory = 'data/visualisation'
     colourImage = cv2.imread(image_path, cv2.IMREAD_COLOR)
     if colourImage is None:
@@ -117,13 +121,19 @@ def processImage(image_path):
     # construct output paths for coordinate and image
     final_output_path = f'output/task1/barcode{number}.png'
     finalBarcodePath = f'output/task1/img{number}.txt'
-    verbose = False
+
+    
+    #for screen demo
+    show_bgr("1. Original (BGR)", colourImage)
+
 
     # convert to grayscale
     bgr = cv2.cvtColor(colourImage, cv2.COLOR_BGR2RGB)
     grayImage = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
 
+    #for screen demo
     beforeRotation = preprocess(grayImage)
+    show_gray("2. Preprocess: Canny + Close", beforeRotation)
 
     contours, _ = cv2.findContours(beforeRotation, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     min_contour_area = 15
@@ -149,7 +159,12 @@ def processImage(image_path):
     
     #convert YOLO results to type integer
     points = np.array(barcodeCoords, dtype=np.int32)
-    
+
+    #for screen demo
+    barcodeOverlay = colourImage.copy()
+    cv2.polylines(barcodeOverlay, [points.reshape(-1,1,2)], True, (0,255,0), 3)
+    show_bgr("3. YOLO OBB on Image", barcodeOverlay)
+
     #draw the extracted points for visualisation purposes 
     if verbose:
         barcodeDrawnImage = colourImage.copy()
@@ -166,10 +181,21 @@ def processImage(image_path):
         saveOutput(outputPath, contourDemo, output_type='image')
     else: #else we still need the filteredContours
         filteredContours = getBarcodeContoursFromOBB(points, contours, colourImage.shape[:2])
-        
+    
+    #for screen demo
+    obbMaskVis = colourImage.copy()
+    cv2.drawContours(obbMaskVis, filteredContours, -1, (0,255,255), 2)
+    show_bgr("4. Contours inside YOLO OBB", obbMaskVis)
+  
     # Rotate the image and determine if rotation occurred
     rotatedImage, isRotated, rotationMatrix = rotateImage(filteredContours, colourImage.copy())
-
+    
+    #for screen demo
+    if isRotated:
+        show_bgr("7. Rotated to horizontal", rotatedImage)
+    else:
+        show_bgr("7. No rotation needed", colourImage)
+    
     if not isRotated:
         digitContours, upsideDown = extractDigitContours(contours, barcodeCoords, imagePath=image_path)
         print(f"Extracting Digit Contours from the image, no rotation occurred")
@@ -225,6 +251,12 @@ def processImage(image_path):
         # Find contours on the preprocessed image
         postRotationContours, _ = cv2.findContours(afterRotation, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
         postRotationContours = [contour for contour in postRotationContours if cv2.contourArea(contour) > min_contour_area]
+
+        # for screen demo
+        contours_vis = rotatedImage.copy()
+        cv2.drawContours(contours_vis, postRotationContours, -1, (0, 255, 0), 2)
+        show_bgr("8. Contours after rotation", contours_vis)
+
         # Visualize the found contours
         if verbose:
             cv2.drawContours(testContours, postRotationContours, -1, (0, 0, 255), 2)  # Draw in red color
@@ -235,6 +267,10 @@ def processImage(image_path):
         # Obtain barcode coordinates from YOLO
         barcodeCoords = getBarcodeCoordinatesFromYolo(postRotation, 'data/model/best.pt', 'data/visualisation', verbose)
         rotatedPoints = np.array(barcodeCoords, dtype=np.int32)
+
+        yolo_overlay = rotatedImage.copy()
+        cv2.polylines(yolo_overlay, [rotatedPoints.reshape(-1, 1, 2)], isClosed=True, color=(0, 255, 255), thickness=3)
+        show_bgr("9. YOLO OBB on rotated image", yolo_overlay)
 
         if verbose:
             # Save the visualization of the YOLO detected bounding box
@@ -263,6 +299,7 @@ def processImage(image_path):
             cv2.drawContours(rota, rotatedFilteredContours, -1, (0, 255, 0), 2)
             saveOutput(beforeCheckingAffineContours, rota, output_type='image')
 
+        # if we're checking affine transformation
         if checkAffineDistortion(rotatedFilteredContours, afterRotation.copy()):
             print(f"{CYAN}Image is affine performing homography.{RESET}")
             
@@ -328,6 +365,9 @@ def processImage(image_path):
                 # Writing the reversed coordinates in the desired format (x1, y1, x2, y2, x3, y3, x4, y4)
                 file.write(','.join([str(p) for p in reversedPoints]))
             print(f"{GREEN} Finished processing {image_path}{RESET}")
+
+            show_bgr("10. Cropped digits (final, rectified)", croppedRegion)
+        # no affine
         else:
             print(f"{CYAN}Image is rotated, but not affine, skipping homography transformation.{RESET}")
             
@@ -335,12 +375,12 @@ def processImage(image_path):
             #had to pass the rotation matrix into this function to reverse engineer coordinates on original image. 
             calculateRotatedBarcodeCoordinates(colourImage, extractedContours, centre, rotationMatrix, finalBarcodePath)
             x, y, w, h = cv2.boundingRect(np.vstack(extractedContours))
-            
+            wholeImageWithBarcodeBoundingBox = rotatedImage.copy()
+            cv2.rectangle(wholeImageWithBarcodeBoundingBox, (x, y), (x + w, y + h), (0, 255, 255), 2)  # Yellow bounding box
             if verbose: 
-                wholeImageWithBarcodeBoundingBox = rotatedImage.copy()
-                cv2.rectangle(wholeImageWithBarcodeBoundingBox, (x, y), (x + w, y + h), (0, 255, 255), 2)  # Yellow bounding box
                 outputWholeImageWithBox = r'data/visualisation/3.0_whole_image_with_bounding_box.jpg'
                 saveOutput(outputWholeImageWithBox, wholeImageWithBarcodeBoundingBox, output_type='image')
+            show_bgr("10. Whole image with barcode bounding box", wholeImageWithBarcodeBoundingBox)
 
             extractedBarcodeRegion = rotatedImage.copy()
             croppedRegion = extractedBarcodeRegion[y:y + h, x:x + w]
@@ -350,3 +390,8 @@ def processImage(image_path):
 
             saveOutput(final_output_path, croppedRegion, output_type='image')
             print(f"{GREEN} Finished processing {image_path}{RESET}")
+
+            show_side_by_side("Final Comparison", rotatedImage, croppedRegion)
+
+    
+    

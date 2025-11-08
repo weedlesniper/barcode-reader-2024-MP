@@ -14,8 +14,44 @@ GREEN = '\033[92m'
 RESET = '\033[0m'
 MAGENTA = "\033[95m"
 
+
+def show_bgr(title, bgr):
+    """Function to perform rgb conversion in case Matplotlib doesn't like bgr"""
+    rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+    displayImage(title, rgb)
+
+def show_gray(title, gray):
+    """Funtion to display a grayscale image"""
+    displayImage(title, gray, cmap='gray')
+
+def show_side_by_side(title, left_bgr, right_bgr):
+    """Show two BGR images side by side at native scales (no resizing, no labels)."""
+    if left_bgr is None or right_bgr is None:
+        return
+   
+
+    hL, wL = left_bgr.shape[:2]
+    hR, wR = right_bgr.shape[:2]
+    H = max(hL, hR)
+
+    # pad to equal heights (no scaling)
+    padL = H - hL
+    padR = H - hR
+    left_pad  = cv2.copyMakeBorder(left_bgr, 0, padL, 0, 0, cv2.BORDER_CONSTANT, value=(0,0,0))
+    right_pad = cv2.copyMakeBorder(right_bgr, 0, padR, 0, 0, cv2.BORDER_CONSTANT, value=(0,0,0))
+
+    concat = np.hstack([left_pad, right_pad])
+    concat_rgb = cv2.cvtColor(concat, cv2.COLOR_BGR2RGB)
+
+    plt.figure(figsize=(12, 6))
+    plt.imshow(concat_rgb)
+    plt.title(title)
+    plt.axis('off')
+    plt.show()
+
+
 def displayImage(title, image, cmap = None):
-    plt.figure(figsize = (10, 6))
+    plt.figure(figsize = (12, 6))
     plt.imshow(image, cmap = cmap)
     plt.title(title)
     plt.axis('off')
@@ -77,6 +113,7 @@ def preprocess(grayImage):
     kernel = np.ones((3, 2), np.uint8)
 
     closedImage = cv2.morphologyEx(edges, cv2.MORPH_CLOSE, kernel)
+
 
     return closedImage
 
@@ -240,7 +277,7 @@ def rotateImage(filteredBarcodeContours, image):
         (width, height) = enclosingRectangle[1]
 
         boxPoints = cv2.boxPoints(enclosingRectangle)
-        boxPoints = np.int0(boxPoints)
+        boxPoints = np.rint(boxPoints).astype(np.int32)
 
         # calculate the sides of the enclosing rectangle
         side1 = np.linalg.norm(boxPoints[0] - boxPoints[1])  
